@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Image ↔ Base64 Tool</title>
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 24px; max-width: 980px; }
+      h1 { margin: 0 0 6px; }
+      .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+      .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; flex: 1; min-width: 320px; background: #fff; }
+      img { max-width: 220px; max-height: 220px; border-radius: 12px; object-fit: cover; border: 1px solid #eee; background:#f8fafc; }
+      textarea { width: 100%; min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+      .meta { color: #555; font-size: 13px; margin-top: 8px; line-height: 1.35; }
+      .warn { color: #b45309; }
+      .err { color: #b91c1c; }
+      .ok { color: #15803d; }
+      button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ddd; cursor: pointer; background:#f9fafb; }
+      button:hover { background:#f3f4f6; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      input[type="file"] { display:block; margin-top: 8px; }
+      .pill { display:inline-block; padding: 4px 10px; border-radius: 999px; background:#f3f4f6; font-size: 12px; margin-left: 8px;}
+      .controls { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+      .controls input[type="number"] { width:90px; }
+      .divider { height: 1px; background:#eee; margin: 18px 0; }
+      .two { display:grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+      @media (max-width: 720px){ .two { grid-template-columns: 1fr; } }
+      label { display:block; }
+      select, input[type="text"], input[type="number"]{
+        padding: 8px 10px; border-radius: 10px; border: 1px solid #ddd;
+      }
+      .small { font-size:12px; color:#6b7280; }
+    </style>
+  </head>
+  <body>
+    <h1>Image ↔ Base64 Tool <span class="pill">Client-side</span></h1>
+    <p class="meta">
+      Encode an image to Base64 (data URL), see real sizes, and decode Base64 back into an image.
+      <br><span class="small">Reality check: Base64 inflates bytes ~33% (not counting headers). If you see it “shrinking”, you encoded the wrong thing.</span>
+    </p>
+
+    <!-- ENCODER -->
+    <div class="card">
+      <label><strong>1) Image → Base64</strong></label>
+      <input id="file" type="file" accept="image/png,image/jpeg,image/webp" />
+
+      <div class="controls meta">
+        <label style="display:flex; gap:8px; align-items:center;">
+          <input id="resize" type="checkbox" checked />
+          Resize + convert to WebP (recommended)
+        </label>
+
+        <span>
+          Max:
+          <input id="maxSize" type="number" value="256" min="64" max="1024" /> px
+        </span>
+
+        <span>
+          Quality:
+          <input id="quality" type="number" min="0.1" max="1" step="0.05" value="0.8" />
+        </span>
+
+        <span class="small">(WebP only when resize enabled)</span>
+      </div>
+
+      <div id="status" class="meta"></div>
+    </div>
+
+    <div class="row" style="margin-top:16px;">
+      <div class="card">
+        <strong>Preview</strong>
+        <div style="margin-top:12px;">
+          <img id="preview" alt="Preview" />
+        </div>
+        <div id="info" class="meta"></div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
+          <strong>Base64 (data URL)</strong>
+          <button id="copy" disabled>Copy</button>
+        </div>
+        <textarea id="out" readonly placeholder="Base64 will appear here..."></textarea>
+        <div id="sizeOut" class="meta"></div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- DECODER -->
+    <div class="row">
+      <div class="card">
+        <strong>2) Base64 → Image</strong>
+        <div class="meta">
+          Paste either a full data URL (<code>data:image/...;base64,</code>) or raw Base64.
+        </div>
+
+        <div class="two" style="margin-top:10px;">
+          <label>
+            <span class="small">If raw Base64, choose MIME</span><br/>
+            <select id="mime">
+              <option value="image/png">image/png</option>
+              <option value="image/jpeg">image/jpeg</option>
+              <option value="image/webp">image/webp</option>
+              <option value="image/gif">image/gif</option>
+            </select>
+          </label>
+
+          <label>
+            <span class="small">Optional: strip whitespace automatically</span><br/>
+            <label style="display:flex; gap:8px; align-items:center; margin-top:6px;">
+              <input id="stripWs" type="checkbox" checked />
+              Strip spaces/newlines
+            </label>
+          </label>
+        </div>
+
+        <div style="margin-top:10px;">
+          <textarea id="inB64" placeholder="Paste Base64 or data URL here..."></textarea>
+        </div>
+
+        <div class="controls" style="margin-top:10px;">
+          <button id="decode">Decode</button>
+          <button id="clear">Clear</button>
+        </div>
+
+        <div id="decodeStatus" class="meta"></div>
+      </div>
+
+      <div class="card">
+        <strong>Decoded Preview</strong>
+        <div style="margin-top:12px;">
+          <img id="decoded" alt="Decoded Preview" />
+        </div>
+        <div id="decodedInfo" class="meta"></div>
+      </div>
+    </div>
+
+    <script>
+      const fileInput = document.getElementById("file");
+      const preview = document.getElementById("preview");
+      const out = document.getElementById("out");
+      const copyBtn = document.getElementById("copy");
+      const info = document.getElementById("info");
+      const status = document.getElementById("status");
+      const sizeOut = document.getElementById("sizeOut");
+
+      const resizeToggle = document.getElementById("resize");
+      const maxSizeInput = document.getElementById("maxSize");
+      const qualityInput = document.getElementById("quality");
+
+      const inB64 = document.getElementById("inB64");
+      const mimeSel = document.getElementById("mime");
+      const stripWs = document.getElementById("stripWs");
+      const decodeBtn = document.getElementById("decode");
+      const clearBtn = document.getElementById("clear");
+      const decodedImg = document.getElementById("decoded");
+      const decodeStatus = document.getElementById("decodeStatus");
+      const decodedInfo = document.getElementById("decodedInfo");
+
+      const ALLOWED = new Set(["image/png", "image/jpeg", "image/webp"]);
+      const MAX_INPUT_BYTES = 6 * 1024 * 1024;      // 6MB: prevents tab death
+      const MAX_DECODED_BYTES = 2 * 1024 * 1024;    // 2MB decoded guard
+      const MAX_OUTPUT_CHARS_WARN = 250_000;        // warn if base64 is huge
+
+      copyBtn.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(out.value);
+          status.innerHTML = `<span class="ok">Copied ✅</span>`;
+        } catch {
+          status.innerHTML = `<span class="err">Copy failed (browser blocked clipboard).</span>`;
+        }
+      });
+
+      fileInput.addEventListener("change", async (e) => {
+        resetEncodeUI();
+
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        if (!ALLOWED.has(file.type)) {
+          status.innerHTML = `<span class="err">Unsupported file type: ${escapeHtml(file.type || "unknown")}</span>`;
+          return;
+        }
+        if (file.size > MAX_INPUT_BYTES) {
+          status.innerHTML = `<span class="err">File too large (${formatBytes(file.size)}). Choose under ${formatBytes(MAX_INPUT_BYTES)}.</span>`;
+          return;
+        }
+
+        try {
+          const shouldResize = resizeToggle.checked;
+          let dataUrl;
+
+          if (shouldResize) {
+            const maxSize = clampInt(parseInt(maxSizeInput.value, 10) || 256, 64, 1024);
+            const quality = clampFloat(parseFloat(qualityInput.value) || 0.8, 0.1, 1);
+            dataUrl = await fileToResizedWebpDataUrl(file, maxSize, quality);
+          } else {
+            dataUrl = await fileToDataUrl(file);
+          }
+
+          out.value = dataUrl;
+          preview.src = dataUrl;
+          copyBtn.disabled = false;
+
+          // HARDENED SIZE CALC (exact decoded bytes)
+          const parsed = parseDataUrlOrRawBase64(dataUrl, null, true);
+          const decodedBytes = base64DecodedByteLength(parsed.base64);
+          const base64Chars = parsed.base64.length;
+          const totalChars = dataUrl.length;
+
+          const overheadPct = file.size > 0
+            ? (((decodedBytes - file.size) / file.size) * 100)
+            : 0;
+
+          info.innerHTML =
+            `Input: <strong>${formatBytes(file.size)}</strong> (${escapeHtml(file.type)})<br>` +
+            `Encoded type: <strong>${escapeHtml(parsed.mime || "unknown")}</strong><br>` +
+            `Decoded bytes (real image bytes): <strong>${formatBytes(decodedBytes)}</strong>`;
+
+          sizeOut.innerHTML =
+            `Base64 chars: <strong>${base64Chars.toLocaleString()}</strong><br>` +
+            `Data URL total chars: <strong>${totalChars.toLocaleString()}</strong><br>` +
+            `Inflation vs original bytes: <strong>${isFinite(overheadPct) ? overheadPct.toFixed(1) : "—"}%</strong>`;
+
+          if (dataUrl.length > MAX_OUTPUT_CHARS_WARN) {
+            status.innerHTML = `<span class="warn">Warning: Base64 is huge. Storing this in Firestore/DB will bloat docs and slow reads.</span>`;
+          } else {
+            status.innerHTML = `<span class="ok">Done ✅</span>`;
+          }
+        } catch (err) {
+          status.innerHTML = `<span class="err">Failed: ${escapeHtml(String(err?.message || err))}</span>`;
+        }
+      });
+
+      decodeBtn.addEventListener("click", () => {
+        decodeStatus.textContent = "";
+        decodedInfo.textContent = "";
+        decodedImg.removeAttribute("src");
+
+        const raw = String(inB64.value || "");
+        if (!raw.trim()) {
+          decodeStatus.innerHTML = `<span class="err">Paste a Base64 string first.</span>`;
+          return;
+        }
+
+        try {
+          const cleaned = stripWs.checked ? raw.replace(/\s+/g, "") : raw;
+          const parsed = parseDataUrlOrRawBase64(cleaned, mimeSel.value, false);
+
+          // Validate base64 alphabet (basic sanity)
+          if (!isProbablyBase64(parsed.base64)) {
+            throw new Error("This doesn't look like Base64. If it's a URL or filename, you're not pasting image bytes.");
+          }
+
+          const decodedBytes = base64DecodedByteLength(parsed.base64);
+          if (decodedBytes > MAX_DECODED_BYTES) {
+            throw new Error(`Decoded image is ${formatBytes(decodedBytes)}. Too large for safe preview here (limit ${formatBytes(MAX_DECODED_BYTES)}).`);
+          }
+
+          const dataUrl = `data:${parsed.mime};base64,${parsed.base64}`;
+          decodedImg.src = dataUrl;
+
+          decodedInfo.innerHTML =
+            `MIME: <strong>${escapeHtml(parsed.mime)}</strong><br>` +
+            `Base64 chars: <strong>${parsed.base64.length.toLocaleString()}</strong><br>` +
+            `Decoded bytes: <strong>${formatBytes(decodedBytes)}</strong>`;
+
+          decodeStatus.innerHTML = `<span class="ok">Decoded ✅</span>`;
+        } catch (err) {
+          decodeStatus.innerHTML = `<span class="err">Decode failed: ${escapeHtml(String(err?.message || err))}</span>`;
+        }
+      });
+
+      clearBtn.addEventListener("click", () => {
+        inB64.value = "";
+        decodedImg.removeAttribute("src");
+        decodeStatus.textContent = "";
+        decodedInfo.textContent = "";
+      });
+
+      function resetEncodeUI() {
+        status.textContent = "";
+        info.textContent = "";
+        sizeOut.textContent = "";
+        out.value = "";
+        preview.removeAttribute("src");
+        copyBtn.disabled = true;
+      }
+
+      function fileToDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onerror = () => reject(new Error("File read error"));
+          reader.onload = () => resolve(reader.result);
+          reader.readAsDataURL(file);
+        });
+      }
+
+      async function fileToResizedWebpDataUrl(file, maxSize, quality) {
+        const blobUrl = URL.createObjectURL(file);
+        try {
+          const img = await loadImage(blobUrl);
+          const { w, h } = fitWithin(img.naturalWidth, img.naturalHeight, maxSize);
+
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+
+          const ctx = canvas.getContext("2d", { alpha: true });
+          if (!ctx) throw new Error("Canvas not supported");
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(img, 0, 0, w, h);
+
+          return canvas.toDataURL("image/webp", quality);
+        } finally {
+          URL.revokeObjectURL(blobUrl);
+        }
+      }
+
+      function loadImage(src) {
+        return new Promise((resolve, reject) => {
+          const img = new Image();
+          img.onload = () => resolve(img);
+          img.onerror = () => reject(new Error("Image decode error"));
+          img.src = src;
+        });
+      }
+
+      function fitWithin(w, h, maxSize) {
+        if (w <= maxSize && h <= maxSize) return { w, h };
+        const scale = Math.min(maxSize / w, maxSize / h);
+        return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) };
+      }
+
+      // Parses either:
+      // - data:image/png;base64,AAAA
+      // - raw base64 AAAA (requires mime fallback)
+      function parseDataUrlOrRawBase64(input, mimeFallback, acceptOnlyDataUrl) {
+        const s = String(input || "");
+
+        if (s.startsWith("data:")) {
+          const comma = s.indexOf(",");
+          if (comma === -1) throw new Error("Invalid data URL (missing comma).");
+          const header = s.slice(5, comma); // "image/png;base64"
+          const b64 = s.slice(comma + 1);
+
+          const parts = header.split(";");
+          const mime = parts[0] || "application/octet-stream";
+          const isB64 = parts.includes("base64");
+          if (!isB64) throw new Error("Data URL is not base64 encoded.");
+
+          return { mime, base64: b64 };
+        }
+
+        if (acceptOnlyDataUrl) {
+          // encoding path always provides data URL, so if not, it's a bug
+          return { mime: mimeFallback || "application/octet-stream", base64: "" };
+        }
+
+        return { mime: mimeFallback || "image/png", base64: s };
+      }
+
+      // Exact decoded byte length from base64 string (no guesswork).
+      function base64DecodedByteLength(b64) {
+        const s = String(b64 || "").replace(/\s+/g, "");
+        if (!s) return 0;
+
+        // padding count
+        let pad = 0;
+        if (s.endsWith("==")) pad = 2;
+        else if (s.endsWith("=")) pad = 1;
+
+        // 4 chars -> 3 bytes
+        // decoded = (len * 3 / 4) - pad
+        return Math.floor((s.length * 3) / 4) - pad;
+      }
+
+      function isProbablyBase64(b64) {
+        const s = String(b64 || "").replace(/\s+/g, "");
+        // Allow = padding at end only.
+        // Base64 alphabet: A-Z a-z 0-9 + /, sometimes - _ (base64url)
+        // We'll accept both.
+        if (s.length < 16) return false; // too short to be a real image usually
+        if (s.length % 4 !== 0) return false;
+        return /^[A-Za-z0-9+/_-]+={0,2}$/.test(s);
+      }
+
+      function formatBytes(bytes) {
+        const units = ["B", "KB", "MB", "GB"];
+        let b = bytes;
+        let i = 0;
+        while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+        return `${b.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+      }
+
+      function clampInt(n, min, max) { return Math.max(min, Math.min(max, n)); }
+      function clampFloat(n, min, max) { return Math.max(min, Math.min(max, n)); }
+
+      function escapeHtml(s) {
+        return String(s).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+      }
+    </script>
+  </body>
+</html>
