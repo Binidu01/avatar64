@@ -1,0 +1,84 @@
+name: Release (tag + GitHub Release)
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version bump type"
+        required: true
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      prerelease:
+        description: "Mark as pre-release?"
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ---- Manual mode: bump version + create tag ----
+      - name: Bump version and create tag (manual)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          BUMP: ${{ inputs.bump }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # bump package.json version (no tag created by npm here)
+          npm version "$BUMP" --no-git-tag-version
+
+          VERSION="v$(node -p "require('./package.json').version")"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          git add package.json package-lock.json 2>/dev/null || true
+          git commit -m "chore(release): $VERSION" || echo "No changes to commit"
+
+          git tag "$VERSION"
+          git push origin HEAD
+          git push origin "$VERSION"
+
+      # ---- Tag mode: just read tag from ref ----
+      - name: Read version from tag (tag push)
+        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+      # Optional: build to ensure tag corresponds to a buildable state
+      - name: Build
+        run: npm run build
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
+          prerelease: ${{ github.event_name == 'workflow_dispatch' && inputs.prerelease || false }}
+          generate_release_notes: true
