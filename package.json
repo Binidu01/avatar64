@@ -1,6 +1,6 @@
 {
   "name": "avatar64",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Bulletproof browser-only utilities to convert profile pictures to WebP base64 text and render base64 back into images.",
   "license": "MIT",
   "author": "Binidu01",
