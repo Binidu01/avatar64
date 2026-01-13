@@ -1,8 +1,9 @@
-name: Release when main workflow changes
+name: Release on workflow change
 
 on:
   push:
-    branches: ["main"]
+    branches:
+      - main
     paths:
       - ".github/workflows/main.yml"
 
@@ -10,34 +11,38 @@ permissions:
   contents: write
 
 jobs:
-  tag_and_release:
+  release:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Create unique tag
-        id: tag
+      - name: Read version from package.json
+        id: version
         run: |
-          # Unique tag per run (reruns won't collide because run_attempt increments)
-          TAG="wf-${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA:0:7}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          VERSION="v$(node -p "require('./package.json').version")"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
 
-      - name: Create and push git tag
+      - name: Create git tag
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create annotated tag
-          git tag -a "$TAG" -m "Release triggered by .github/workflows/main.yml change"
-          git push origin "$TAG"
+          # Fail if tag already exists (this is GOOD)
+          git rev-parse "$VERSION" >/dev/null 2>&1 && {
+            echo "Tag $VERSION already exists. Bump version manually.";
+            exit 1;
+          }
+
+          git tag -a "$VERSION" -m "Release $VERSION"
+          git push origin "$VERSION"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: ${{ steps.tag.outputs.tag }}
+          tag_name: ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
           generate_release_notes: true
